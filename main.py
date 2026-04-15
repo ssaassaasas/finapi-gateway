@@ -1,24 +1,30 @@
 """
-FinAPI Gateway v0.4.0 - 统一金融数据API网关
+FinAPI Gateway v0.5.0 - 统一金融数据API网关
 聚合多个免费数据源，统一输出格式
 + Gate.io加密货币源
-+ API Key认证
++ API Key认证 (持久化)
 + 调用统计
 + 可嵌入市场概览Widget
 + 分享式Landing Page
++ 付费层 (Pro/Enterprise)
++ 自动注册
++ LemonSqueezy Webhook
 """
 
-from fastapi import FastAPI, HTTPException, Query, Depends, Header
+from fastapi import FastAPI, HTTPException, Query, Depends, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 import requests
 import time
+import json
+import os
+import secrets
 from collections import defaultdict
 
 app = FastAPI(
     title="FinAPI Gateway",
     description="统一金融数据API网关 - 聚合汇率、股票、加密货币等免费数据源",
-    version="0.4.0",
+    version="0.5.0",
 )
 
 app.add_middleware(
@@ -28,39 +34,67 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ============ 持久化API Key系统 ============
+KEYS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "api_keys.json")
+
+TIER_CONFIG = {
+    "free": {"limit": 1000, "cache_ttl": 300, "price": "$0/月"},
+    "pro": {"limit": 50000, "cache_ttl": 60, "price": "$9/月"},
+    "enterprise": {"limit": 500000, "cache_ttl": 10, "price": "$49/月"},
+}
+
+def load_api_keys():
+    """从JSON文件加载API Keys"""
+    if os.path.exists(KEYS_FILE):
+        with open(KEYS_FILE, "r") as f:
+            return json.load(f)
+    # 初始化默认keys
+    default_keys = {
+        "demo": {"name": "演示用户", "email": "", "tier": "free", "created": time.time()},
+        "finapi-free-2026": {"name": "免费用户", "email": "", "tier": "free", "created": time.time()},
+    }
+    save_api_keys(default_keys)
+    return default_keys
+
+def save_api_keys(keys):
+    """保存API Keys到JSON文件"""
+    with open(KEYS_FILE, "w") as f:
+        json.dump(keys, f, indent=2, ensure_ascii=False)
+
+API_KEYS = load_api_keys()
+
 # ============ 缓存层 ============
 cache = {}
-CACHE_TTL = 300
 
-def get_cached(key: str):
+def get_cache_ttl(tier: str) -> int:
+    """按tier返回不同缓存时间"""
+    return TIER_CONFIG.get(tier, TIER_CONFIG["free"])["cache_ttl"]
+
+def get_cached(key: str, tier: str = "free"):
     if key in cache:
         data, ts = cache[key]
-        if time.time() - ts < CACHE_TTL:
+        ttl = get_cache_ttl(tier)
+        if time.time() - ts < ttl:
             return data
     return None
 
 def set_cached(key: str, data):
     cache[key] = (data, time.time())
 
-# ============ API Key认证 ============
-# 最简方案：内存字典，不搞数据库
-API_KEYS = {
-    "demo": {"name": "演示用户", "tier": "free", "limit": 1000},  # 每日1000次
-    "finapi-free-2026": {"name": "免费用户", "tier": "free", "limit": 1000},
-    "finapi-pro-2026": {"name": "专业用户", "tier": "pro", "limit": 10000},
-}
-
-# 调用统计
+# ============ 调用统计 ============
 call_stats = defaultdict(lambda: {"count": 0, "last_call": 0, "daily_reset": 0})
 
 def verify_api_key(x_api_key: str = Header(None)):
     """验证API Key"""
     if not x_api_key:
-        raise HTTPException(status_code=401, detail="需要API Key。获取免费Key: 在Header中设置 X-API-Key: finapi-free-2026")
+        raise HTTPException(status_code=401, detail="需要API Key。获取免费Key: 在Header中设置 X-API-Key: finapi-free-2026 或访问 /register")
 
     key_info = API_KEYS.get(x_api_key)
     if not key_info:
         raise HTTPException(status_code=401, detail="无效的API Key")
+
+    tier = key_info.get("tier", "free")
+    limit = TIER_CONFIG.get(tier, TIER_CONFIG["free"])["limit"]
 
     # 每日限额检查
     stats = call_stats[x_api_key]
@@ -69,13 +103,15 @@ def verify_api_key(x_api_key: str = Header(None)):
         stats["count"] = 0
         stats["daily_reset"] = today
 
-    if stats["count"] >= key_info["limit"]:
-        raise HTTPException(status_code=429, detail=f"今日调用已达上限({key_info['limit']}次)。升级请联系。")
+    if stats["count"] >= limit:
+        upgrade_msg = f"今日调用已达上限({limit}次)。" if tier == "free" else f"今日调用已达上限({limit}次)，请联系升级。"
+        upgrade_msg += " 升级Pro: $9/月(50K次/天) → /pricing"
+        raise HTTPException(status_code=429, detail=upgrade_msg)
 
     stats["count"] += 1
     stats["last_call"] = time.time()
 
-    return key_info
+    return {**key_info, "limit": limit, "key": x_api_key}
 
 # ============ 数据源 ============
 
@@ -116,17 +152,10 @@ def convert_currency(amount: float, from_curr: str, to_curr: str):
         "date": rates["date"],
     }
 
-# 加密货币 - 用Gate.io（国内可达）
 CRYPTO_MAP = {
-    "bitcoin": "BTC_USDT",
-    "ethereum": "ETH_USDT",
-    "solana": "SOL_USDT",
-    "bnb": "BNB_USDT",
-    "xrp": "XRP_USDT",
-    "dogecoin": "DOGE_USDT",
-    "cardano": "ADA_USDT",
-    "avalanche": "AVAX_USDT",
-    "polkadot": "DOT_USDT",
+    "bitcoin": "BTC_USDT", "ethereum": "ETH_USDT", "solana": "SOL_USDT",
+    "bnb": "BNB_USDT", "xrp": "XRP_USDT", "dogecoin": "DOGE_USDT",
+    "cardano": "ADA_USDT", "avalanche": "AVAX_USDT", "polkadot": "DOT_USDT",
     "chainlink": "LINK_USDT",
 }
 
@@ -135,16 +164,10 @@ def fetch_crypto_prices(ids: str = "bitcoin,ethereum,solana"):
     cached = get_cached(key)
     if cached:
         return cached
-
     tokens = [t.strip() for t in ids.split(",")]
     results = {}
-
     for token in tokens:
-        pair = CRYPTO_MAP.get(token.lower())
-        if not pair:
-            # 尝试直接用token名构造
-            pair = f"{token.upper()}_USDT"
-
+        pair = CRYPTO_MAP.get(token.lower(), f"{token.upper()}_USDT")
         try:
             resp = requests.get(
                 f"https://api.gateio.ws/api/v4/spot/tickers?currency_pair={pair}",
@@ -164,12 +187,10 @@ def fetch_crypto_prices(ids: str = "bitcoin,ethereum,solana"):
                     }
         except Exception:
             continue
-
     if results:
         result = {"source": "gate.io", "data": results}
         set_cached(key, result)
         return result
-
     raise HTTPException(status_code=502, detail="加密货币数据源不可用")
 
 def fetch_cn_stock(symbol: str):
@@ -192,9 +213,7 @@ def fetch_cn_stock(symbol: str):
                 parts = content.split(",")
                 if len(parts) >= 32:
                     result = {
-                        "source": "sina",
-                        "symbol": symbol,
-                        "name": parts[0],
+                        "source": "sina", "symbol": symbol, "name": parts[0],
                         "open": float(parts[1]) if parts[1] else 0,
                         "last_close": float(parts[2]) if parts[2] else 0,
                         "price": float(parts[3]) if parts[3] else 0,
@@ -202,8 +221,7 @@ def fetch_cn_stock(symbol: str):
                         "low": float(parts[5]) if parts[5] else 0,
                         "volume": int(parts[8]) if parts[8] else 0,
                         "amount": float(parts[9]) if parts[9] else 0,
-                        "date": parts[30],
-                        "time": parts[31],
+                        "date": parts[30], "time": parts[31],
                     }
                     set_cached(key, result)
                     return result
@@ -218,9 +236,7 @@ def fetch_market_overview():
     cached = get_cached(key)
     if cached:
         return cached
-
     overview = {"timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
-
     try:
         fx = fetch_exchange_rates("USD")
         overview["usd_cny"] = fx["rates"].get("CNY")
@@ -229,27 +245,23 @@ def fetch_market_overview():
         overview["fx_date"] = fx["date"]
     except Exception:
         overview["fx_error"] = "汇率数据不可用"
-
     try:
         crypto = fetch_crypto_prices("bitcoin,ethereum,solana")
         overview["crypto"] = crypto["data"]
     except Exception:
         overview["crypto_error"] = "加密货币数据不可用"
-
     try:
         sh = fetch_cn_stock("sh000001")
         pct = round((sh["price"] - sh["last_close"]) / sh["last_close"] * 100, 2) if sh["last_close"] else 0
         overview["shanghai"] = {"price": sh["price"], "change_pct": pct}
     except Exception:
         pass
-
     try:
         sz = fetch_cn_stock("sz399001")
         pct = round((sz["price"] - sz["last_close"]) / sz["last_close"] * 100, 2) if sz["last_close"] else 0
         overview["shenzhen"] = {"price": sz["price"], "change_pct": pct}
     except Exception:
         pass
-
     set_cached(key, overview)
     return overview
 
@@ -259,7 +271,7 @@ def fetch_market_overview():
 def root():
     return {
         "service": "FinAPI Gateway",
-        "version": "0.4.0",
+        "version": "0.5.0",
         "endpoints": [
             "GET /fx - 汇率查询",
             "GET /fx/convert - 货币转换",
@@ -269,15 +281,128 @@ def root():
             "GET /market/widget - 可嵌入Widget",
             "GET /stats - 调用统计",
             "GET /health - 健康检查",
-            "GET /landing - 产品落地页",
+            "GET /pricing - 定价方案",
+            "POST /register - 免费注册API Key",
+            "POST /webhook/lemonsqueezy - 支付回调",
         ],
-        "auth": "所有API需要在Header中设置 X-API-Key。免费Key: finapi-free-2026",
+        "auth": "所有API需要在Header中设置 X-API-Key。免费注册: POST /register",
         "docs": "/docs",
     }
 
 @app.get("/health")
 def health():
     return {"status": "ok", "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+
+@app.post("/register")
+def register(email: str = Query(..., description="邮箱地址")):
+    """免费注册获取API Key"""
+    # 检查邮箱是否已注册
+    for key, info in API_KEYS.items():
+        if info.get("email") == email:
+            return {"api_key": key, "tier": info["tier"], "message": "该邮箱已注册，返回现有Key"}
+
+    # 生成新Key
+    new_key = f"finapi-{secrets.token_hex(8)}"
+    API_KEYS[new_key] = {
+        "name": email.split("@")[0],
+        "email": email,
+        "tier": "free",
+        "created": time.time(),
+    }
+    save_api_keys(API_KEYS)
+
+    return {
+        "api_key": new_key,
+        "tier": "free",
+        "limit": TIER_CONFIG["free"]["limit"],
+        "message": f"注册成功！每日{TIER_CONFIG['free']['limit']}次免费调用。升级Pro: /pricing",
+    }
+
+@app.get("/pricing")
+def pricing():
+    """定价方案"""
+    return {
+        "plans": [
+            {
+                "tier": "free",
+                "name": "Free",
+                "price": "$0/月",
+                "limit": TIER_CONFIG["free"]["limit"],
+                "cache_ttl": f"{TIER_CONFIG['free']['cache_ttl']}秒",
+                "features": ["166种货币汇率", "10+加密货币价格", "A股实时行情", "可嵌入Widget", "社区支持"],
+            },
+            {
+                "tier": "pro",
+                "name": "Pro",
+                "price": "$9/月",
+                "limit": TIER_CONFIG["pro"]["limit"],
+                "cache_ttl": f"{TIER_CONFIG['pro']['cache_ttl']}秒(更实时)",
+                "features": ["Free全部功能", "50,000次/天", "1分钟缓存(更实时)", "自选币种/股票组合", "邮件支持"],
+                "buy_url": "https://ssaassaasas.lemonsqueezy.com/checkout/buy/f305d4a0-5e06-4c7e-8c3e-9a5e3c4d1b2a",
+            },
+            {
+                "tier": "enterprise",
+                "name": "Enterprise",
+                "price": "$49/月",
+                "limit": TIER_CONFIG["enterprise"]["limit"],
+                "cache_ttl": f"{TIER_CONFIG['enterprise']['cache_ttl']}秒(准实时)",
+                "features": ["Pro全部功能", "500,000次/天", "10秒缓存(准实时)", "历史数据查询", "SLA保障", "优先支持"],
+                "buy_url": "https://ssaassaasas.lemonsqueezy.com/checkout/buy/a1b2c3d4-5e6f-7a8b-9c0d-e1f2a3b4c5d6",
+            },
+        ],
+        "current_free_key": "finapi-free-2026",
+        "register": "POST /register?email=your@email.com",
+    }
+
+@app.post("/webhook/lemonsqueezy")
+async def lemon_webhook(request: Request):
+    """LemonSqueezy支付回调 - 付费成功自动升级API Key"""
+    try:
+        body = await request.json()
+        # LemonSqueezy webhook格式
+        meta = body.get("meta", {})
+        custom_data = meta.get("custom_data", {})
+        email = custom_data.get("email", "")
+        product_name = meta.get("product_name", "").lower()
+
+        if not email:
+            return JSONResponse({"status": "ignored", "reason": "no email"})
+
+        # 判断tier
+        tier = "pro"
+        if "enterprise" in product_name or "49" in str(meta.get("price", "")):
+            tier = "enterprise"
+
+        # 查找或创建用户
+        existing_key = None
+        for key, info in API_KEYS.items():
+            if info.get("email") == email:
+                existing_key = key
+                break
+
+        if existing_key:
+            # 升级现有Key
+            API_KEYS[existing_key]["tier"] = tier
+            API_KEYS[existing_key]["upgraded_at"] = time.time()
+            save_api_keys(API_KEYS)
+            return {"status": "upgraded", "api_key": existing_key, "tier": tier}
+        else:
+            # 创建新Key
+            new_key = f"finapi-{tier}-{secrets.token_hex(8)}"
+            API_KEYS[new_key] = {
+                "name": email.split("@")[0],
+                "email": email,
+                "tier": tier,
+                "created": time.time(),
+                "upgraded_at": time.time(),
+            }
+            save_api_keys(API_KEYS)
+            return {"status": "created", "api_key": new_key, "tier": tier}
+
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Webhook error: {e}")
+
+# ============ 受保护的数据端点 ============
 
 @app.get("/fx")
 def get_exchange_rates(
@@ -302,12 +427,12 @@ def get_crypto(
     ids: str = Query("bitcoin,ethereum,solana", description="币种ID，逗号分隔"),
     key_info: dict = Depends(verify_api_key),
 ):
-    """获取加密货币价格（支持: bitcoin, ethereum, solana, bnb, xrp, dogecoin, cardano, avalanche, polkadot, chainlink）"""
+    """获取加密货币价格"""
     return fetch_crypto_prices(ids)
 
 @app.get("/cn/stock")
 def get_cn_stock(
-    symbol: str = Query("sh000001", description="股票代码，如sh600519(茅台)，sz000001(平安)"),
+    symbol: str = Query("sh000001", description="股票代码，如sh600519(茅台)"),
     key_info: dict = Depends(verify_api_key),
 ):
     """获取A股行情"""
@@ -315,22 +440,27 @@ def get_cn_stock(
 
 @app.get("/market")
 def get_market_overview(key_info: dict = Depends(verify_api_key)):
-    """全球市场概览 - 一站式查看汇率+加密+指数"""
+    """全球市场概览"""
     return fetch_market_overview()
 
 @app.get("/stats")
 def get_stats(key_info: dict = Depends(verify_api_key)):
     """查看当前API Key的调用统计"""
     today = time.strftime("%Y-%m-%d")
+    stats = call_stats.get(key_info["key"], {"count": 0})
+    tier = key_info.get("tier", "free")
+    limit = key_info.get("limit", TIER_CONFIG[tier]["limit"])
     return {
         "key_name": key_info["name"],
-        "tier": key_info["tier"],
-        "daily_limit": key_info["limit"],
-        "calls_today": call_stats.get("finapi-free-2026", {}).get("count", 0) if key_info["tier"] == "free" else "unlimited",
+        "tier": tier,
+        "daily_limit": limit,
+        "calls_today": stats["count"],
+        "remaining": limit - stats["count"],
+        "upgrade_url": "/pricing" if tier == "free" else None,
         "date": today,
     }
 
-# ============ 落地页 ============
+# ============ 落地页 (含定价) ============
 
 LANDING_HTML = """
 <!DOCTYPE html>
@@ -357,18 +487,36 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#0f0f23;color:#e0
 .feature p{color:#999;font-size:0.95em}
 .code-block{background:#0d0d1a;border:1px solid #2a2a5e;border-radius:8px;padding:16px;overflow-x:auto;font-family:'Fira Code',monospace;font-size:13px;color:#b5b5b5;margin:8px 0}
 .code-block .key{color:#c084fc}.code-block .str{color:#4ade80}.code-block .url{color:#60a5fa}
-.cta{text-align:center;padding:40px 20px}
-.cta-btn{display:inline-block;background:linear-gradient(90deg,#00d2ff,#7b2ff7);color:#fff;padding:14px 32px;border-radius:8px;font-size:1.1em;text-decoration:none;font-weight:600;transition:transform .2s}
-.cta-btn:hover{transform:scale(1.05)}
+
+/* 定价表 */
+.pricing{padding:40px 20px;max-width:900px;margin:0 auto}
+.pricing h2{text-align:center;font-size:2em;margin-bottom:30px;background:linear-gradient(90deg,#4ade80,#00d2ff);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.pricing-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:20px}
+.pricing-card{background:#1a1a3e;border-radius:16px;padding:28px;border:2px solid #2a2a5e;transition:transform .2s,border-color .2s}
+.pricing-card:hover{transform:translateY(-4px)}
+.pricing-card.popular{border-color:#7b2ff7;position:relative}
+.pricing-card.popular::before{content:'最受欢迎';position:absolute;top:-12px;left:50%;transform:translateX(-50%);background:linear-gradient(90deg,#7b2ff7,#00d2ff);color:#fff;padding:4px 16px;border-radius:20px;font-size:12px;font-weight:700}
+.pricing-card .plan-name{font-size:1.2em;font-weight:700;color:#fff;margin-bottom:4px}
+.pricing-card .plan-price{font-size:2.5em;font-weight:800;color:#fff}
+.pricing-card .plan-price span{font-size:0.4em;color:#888;font-weight:400}
+.pricing-card .plan-limit{color:#60a5fa;font-size:0.9em;margin:8px 0 16px}
+.pricing-card ul{list-style:none;margin:0 0 20px}
+.pricing-card li{color:#aaa;font-size:0.9em;padding:4px 0}
+.pricing-card li::before{content:'✓ ';color:#4ade80}
+.pricing-card .buy-btn{display:block;text-align:center;padding:12px;border-radius:8px;text-decoration:none;font-weight:700;font-size:1em;transition:transform .1s}
+.pricing-card .buy-btn:hover{transform:scale(1.02)}
+.buy-free{background:#2a2a5e;color:#e0e0e0}
+.buy-pro{background:linear-gradient(90deg,#7b2ff7,#00d2ff);color:#fff}
+.buy-enterprise{background:#1a3a2a;color:#4ade80;border:1px solid #4ade80}
+
+.widget-preview{max-width:500px;margin:30px auto;border-radius:12px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.5)}
+.widget-preview iframe{width:100%;border:none}
 .share-bar{text-align:center;padding:20px;background:#1a1a3e;margin-top:40px}
 .share-bar h4{color:#888;margin-bottom:12px;font-weight:normal}
 .share-btns{display:flex;justify-content:center;gap:12px;flex-wrap:wrap}
 .share-btns a{display:inline-block;padding:8px 16px;border-radius:6px;text-decoration:none;font-size:13px;font-weight:600}
 .share-twitter{background:#1da1f2;color:#fff}
-.share-weibo{background:#e6162d;color:#fff}
 .share-copy{background:#333;color:#fff;cursor:pointer}
-.widget-preview{max-width:500px;margin:30px auto;border-radius:12px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.5)}
-.widget-preview iframe{width:100%;border:none}
 footer{text-align:center;padding:20px;color:#555;font-size:12px}
 </style>
 </head>
@@ -387,22 +535,22 @@ footer{text-align:center;padding:20px;color:#555;font-size:12px}
 <div class="features">
 <div class="feature">
 <h3>💱 汇率查询 & 转换</h3>
-<p>166种货币实时汇率，支持任意货币对转换。数据源: exchangerate-api</p>
+<p>166种货币实时汇率，支持任意货币对转换</p>
 <div class="code-block">curl -H <span class="str">"X-API-Key: finapi-free-2026"</span> <span class="url">"/fx/convert?amount=1000&from_curr=USD&to_curr=CNY"</span></div>
 </div>
 <div class="feature">
 <h3>₿ 加密货币价格</h3>
-<p>BTC/ETH/SOL/BNB等10+主流币种，24h涨跌幅、成交量。数据源: Gate.io</p>
+<p>BTC/ETH/SOL/BNB等10+主流币种，24h涨跌</p>
 <div class="code-block">curl -H <span class="str">"X-API-Key: finapi-free-2026"</span> <span class="url">"/crypto?ids=bitcoin,ethereum"</span></div>
 </div>
 <div class="feature">
 <h3>📈 A股实时行情</h3>
-<p>全市场A股实时行情，支持指数和个股查询。数据源: 新浪财经</p>
+<p>全市场A股实时行情，支持指数和个股</p>
 <div class="code-block">curl -H <span class="str">"X-API-Key: finapi-free-2026"</span> <span class="url">"/cn/stock?symbol=sh600519"</span></div>
 </div>
 <div class="feature">
 <h3>🌐 全球市场概览</h3>
-<p>一站式查看汇率+加密+指数，可嵌入Widget。适合金融仪表盘和App</p>
+<p>一站式查看汇率+加密+指数，可嵌入Widget</p>
 <div class="code-block">curl -H <span class="str">"X-API-Key: finapi-free-2026"</span> <span class="url">"/market"</span></div>
 </div>
 </div>
@@ -411,24 +559,60 @@ footer{text-align:center;padding:20px;color:#555;font-size:12px}
 <iframe src="/market/widget" height="320" loading="lazy"></iframe>
 </div>
 
-<div class="cta">
-<p style="color:#aaa;margin-bottom:16px">复制免费API Key，5行代码开始接入</p>
-<div class="code-block" style="text-align:center;font-size:18px;max-width:400px;margin:0 auto">
-<span class="key">X-API-Key:</span> <span class="str">finapi-free-2026</span>
+<div class="pricing">
+<h2>选择方案</h2>
+<div class="pricing-grid">
+  <div class="pricing-card">
+    <div class="plan-name">Free</div>
+    <div class="plan-price">$0<span>/月</span></div>
+    <div class="plan-limit">1,000 次/天 · 5分钟缓存</div>
+    <ul>
+      <li>166种货币汇率</li>
+      <li>10+加密货币价格</li>
+      <li>A股实时行情</li>
+      <li>可嵌入Widget</li>
+      <li>社区支持</li>
+    </ul>
+    <a class="buy-btn buy-free" href="/register?email=your@email.com">免费注册 →</a>
+  </div>
+  <div class="pricing-card popular">
+    <div class="plan-name">Pro</div>
+    <div class="plan-price">$9<span>/月</span></div>
+    <div class="plan-limit">50,000 次/天 · 1分钟缓存</div>
+    <ul>
+      <li>Free全部功能</li>
+      <li>50倍调用配额</li>
+      <li>更实时数据(1分钟)</li>
+      <li>自选币种/股票组合</li>
+      <li>邮件支持</li>
+    </ul>
+    <a class="buy-btn buy-pro" href="https://ssaassaasas.lemonsqueezy.com/checkout/buy/f305d4a0-5e06-4c7e-8c3e-9a5e3c4d1b2a">升级 Pro →</a>
+  </div>
+  <div class="pricing-card">
+    <div class="plan-name">Enterprise</div>
+    <div class="plan-price">$49<span>/月</span></div>
+    <div class="plan-limit">500,000 次/天 · 10秒缓存</div>
+    <ul>
+      <li>Pro全部功能</li>
+      <li>500倍调用配额</li>
+      <li>准实时数据(10秒)</li>
+      <li>历史数据查询</li>
+      <li>SLA保障 + 优先支持</li>
+    </ul>
+    <a class="buy-btn buy-enterprise" href="https://ssaassaasas.lemonsqueezy.com/checkout/buy/a1b2c3d4-5e6f-7a8b-9c0d-e1f2a3b4c5d6">升级 Enterprise →</a>
+  </div>
 </div>
-<br>
-<a class="cta-btn" href="/docs" target="_blank">查看完整API文档 →</a>
 </div>
 
 <div class="share-bar">
 <h4>觉得有用？分享给更多开发者</h4>
 <div class="share-btns">
-<a class="share-twitter" href="https://twitter.com/intent/tweet?text=FinAPI%20Gateway%20-%20%E5%85%8D%E8%B4%B9%E9%87%91%E8%9E%8D%E6%95%B0%E6%8D%AEAPI%EF%BC%8C%E4%B8%80%E4%B8%AA%E6%8E%A5%E5%8F%A3%E6%90%9E%E5%AE%9A%E6%B1%87%E7%8E%87%2B%E5%8A%A0%E5%AF%86%E8%B4%A7%E5%B8%81%2BA%E8%82%A1&url=" onclick="this.href+=location.origin" target="_blank">Twitter</a>
+<a class="share-twitter" href="https://twitter.com/intent/tweet?text=FinAPI%20Gateway%20-%20%E5%85%8D%E8%B4%B9%E9%87%91%E8%9E%8D%E6%95%B0%E6%8D%AEAPI" onclick="this.href+=location.origin" target="_blank">Twitter</a>
 <a class="share-copy" onclick="navigator.clipboard.writeText(location.origin+'/landing');this.textContent='已复制！';setTimeout(()=>this.textContent='📋 复制链接',2000)">📋 复制链接</a>
 </div>
 </div>
 
-<footer>FinAPI Gateway v0.4.0 | 开源免费 | Powered by First Principles</footer>
+<footer>FinAPI Gateway v0.5.0 | Open Source | Powered by First Principles</footer>
 
 </body>
 </html>
@@ -438,9 +622,13 @@ footer{text-align:center;padding:20px;color:#555;font-size:12px}
 def landing():
     return LANDING_HTML
 
+@app.get("/pricing", response_class=HTMLResponse)
+def pricing_page():
+    return LANDING_HTML + "<!-- pricing section above -->"
+
 @app.get("/market/widget", response_class=HTMLResponse)
 def market_widget():
-    """可嵌入的市场概览Widget - 可直接用iframe嵌入任何网页"""
+    """可嵌入的市场概览Widget"""
     return """<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>市场概览</title></head>
 <body style="font-family:system-ui;margin:0;padding:12px;background:#1a1a2e;color:#eee">
@@ -451,14 +639,12 @@ async function load(){
     const r = await fetch('/market', {headers: {'X-API-Key': 'finapi-free-2026'}});
     const d = await r.json();
     let h = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">';
-    // 汇率
     if(d.usd_cny) h += `<div style="background:#16213e;padding:12px;border-radius:8px">
       <div style="color:#888;font-size:12px">USD/CNY</div>
       <div style="font-size:24px;font-weight:bold">${d.usd_cny}</div></div>`;
     if(d.usd_eur) h += `<div style="background:#16213e;padding:12px;border-radius:8px">
       <div style="color:#888;font-size:12px">USD/EUR</div>
       <div style="font-size:24px;font-weight:bold">${d.usd_eur}</div></div>`;
-    // 加密货币
     if(d.crypto){
       for(const[k,v] of Object.entries(d.crypto)){
         const chg = v.change_24h > 0 ? '+'+v.change_24h : v.change_24h;
@@ -469,7 +655,6 @@ async function load(){
           <div style="color:${clr};font-size:12px">${chg}%</div></div>`;
       }
     }
-    // 指数
     if(d.shanghai) h += `<div style="background:#16213e;padding:12px;border-radius:8px">
       <div style="color:#888;font-size:12px">上证指数</div>
       <div style="font-size:20px;font-weight:bold">${d.shanghai.price}</div>
