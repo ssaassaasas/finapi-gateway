@@ -525,7 +525,6 @@ LANDING_HTML = """
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>FinAPI Gateway - 统一金融数据API | 免费汇率·加密货币·A股</title>
-<meta name="description" content="一个API搞定汇率查询、加密货币价格、A股行情。免费1000次/天，5行代码接入。">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:system-ui,-apple-system,sans-serif;background:#0f0f23;color:#e0e0e0;line-height:1.6}
@@ -544,10 +543,9 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#0f0f23;color:#e0
 .code-block{background:#0d0d1a;border:1px solid #2a2a5e;border-radius:8px;padding:16px;overflow-x:auto;font-family:'Fira Code',monospace;font-size:13px;color:#b5b5b5;margin:8px 0}
 .code-block .key{color:#c084fc}.code-block .str{color:#4ade80}.code-block .url{color:#60a5fa}
 
-/* 定价表 */
 .pricing{padding:40px 20px;max-width:900px;margin:0 auto}
 .pricing h2{text-align:center;font-size:2em;margin-bottom:30px;background:linear-gradient(90deg,#4ade80,#00d2ff);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
-.pricing-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:20px}
+.pricing-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:20px}
 .pricing-card{background:#1a1a3e;border-radius:16px;padding:28px;border:2px solid #2a2a5e;transition:transform .2s,border-color .2s}
 .pricing-card:hover{transform:translateY(-4px)}
 .pricing-card.popular{border-color:#7b2ff7;position:relative}
@@ -559,21 +557,39 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#0f0f23;color:#e0
 .pricing-card ul{list-style:none;margin:0 0 20px}
 .pricing-card li{color:#aaa;font-size:0.9em;padding:4px 0}
 .pricing-card li::before{content:'✓ ';color:#4ade80}
-.pricing-card .buy-btn{display:block;text-align:center;padding:12px;border-radius:8px;text-decoration:none;font-weight:700;font-size:1em;transition:transform .1s}
+.pricing-card .buy-btn{display:block;text-align:center;padding:12px;border-radius:8px;text-decoration:none;font-weight:700;font-size:1em;cursor:pointer;transition:transform .1s;border:none}
 .pricing-card .buy-btn:hover{transform:scale(1.02)}
 .buy-free{background:#2a2a5e;color:#e0e0e0}
 .buy-pro{background:linear-gradient(90deg,#7b2ff7,#00d2ff);color:#fff}
 .buy-enterprise{background:#1a3a2a;color:#4ade80;border:1px solid #4ade80}
+.pay-info{background:#0d0d1a;border-radius:8px;padding:12px;margin-bottom:12px}
+.pay-info .pay-label{font-weight:700;font-size:13px;margin-bottom:6px}
+.pay-info .pay-addr{font-family:monospace;font-size:11px;word-break:break-all;padding:6px;background:#111;border-radius:4px;margin-top:4px}
+.pay-info .pay-amount{font-size:11px;color:#666;margin-top:4px}
 
 .widget-preview{max-width:500px;margin:30px auto;border-radius:12px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.5)}
 .widget-preview iframe{width:100%;border:none}
 .share-bar{text-align:center;padding:20px;background:#1a1a3e;margin-top:40px}
 .share-bar h4{color:#888;margin-bottom:12px;font-weight:normal}
 .share-btns{display:flex;justify-content:center;gap:12px;flex-wrap:wrap}
-.share-btns a{display:inline-block;padding:8px 16px;border-radius:6px;text-decoration:none;font-size:13px;font-weight:600}
-.share-twitter{background:#1da1f2;color:#fff}
-.share-copy{background:#333;color:#fff;cursor:pointer}
+.share-btns button{display:inline-block;padding:8px 16px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;border:none}
+.share-copy{background:#333;color:#fff}
 footer{text-align:center;padding:20px;color:#555;font-size:12px}
+
+/* Modal */
+.modal-overlay{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:1000;justify-content:center;align-items:center}
+.modal-overlay.active{display:flex}
+.modal{background:#1a1a3e;border-radius:16px;padding:32px;max-width:480px;width:90%;border:1px solid #2a2a5e}
+.modal h3{color:#fff;font-size:1.3em;margin-bottom:16px}
+.modal label{display:block;color:#888;font-size:13px;margin:12px 0 4px}
+.modal input,.modal select{width:100%;padding:10px;border-radius:8px;border:1px solid #2a2a5e;background:#0d0d1a;color:#fff;font-size:14px}
+.modal input:focus,.modal select:focus{outline:none;border-color:#7b2ff7}
+.modal .modal-btn{width:100%;padding:12px;border-radius:8px;border:none;font-weight:700;font-size:1em;cursor:pointer;margin-top:16px;background:linear-gradient(90deg,#7b2ff7,#00d2ff);color:#fff}
+.modal .modal-btn:hover{opacity:0.9}
+.modal .close-btn{position:absolute;top:12px;right:16px;background:none;border:none;color:#888;font-size:20px;cursor:pointer}
+.modal .msg{margin-top:12px;padding:10px;border-radius:8px;font-size:13px;display:none}
+.modal .msg.success{display:block;background:#1a3a2a;color:#4ade80}
+.modal .msg.error{display:block;background:#3a1a1a;color:#ff6b6b}
 </style>
 </head>
 <body>
@@ -629,7 +645,7 @@ footer{text-align:center;padding:20px;color:#555;font-size:12px}
       <li>可嵌入Widget</li>
       <li>社区支持</li>
     </ul>
-    <a class="buy-btn buy-free" href="/register?email=your@email.com">免费注册 →</a>
+    <button class="buy-btn buy-free" onclick="openModal('register')">免费注册</button>
   </div>
   <div class="pricing-card popular">
     <div class="plan-name">Pro</div>
@@ -642,16 +658,15 @@ footer{text-align:center;padding:20px;color:#555;font-size:12px}
       <li>自选币种/股票组合</li>
       <li>邮件支持</li>
     </ul>
-    <div class="pay-methods" style="margin-bottom:12px">
-      <div style="font-size:13px;color:#f7931a;font-weight:700;margin-bottom:8px">₿ BTC</div>
-      <div style="background:#0d0d1a;padding:8px;border-radius:6px;font-family:monospace;font-size:11px;word-break:break-all;color:#4ade80">1MLcB51Zya52oV445GZGMn1qqeYEAJ67Ds</div>
-      <div style="font-size:11px;color:#666;margin-top:4px">金额: 0.0001 BTC</div>
-      <div style="margin-top:12px;font-size:13px;color:#00457C;font-weight:700;margin-bottom:8px">💳 PayPal</div>
-      <div style="background:#0d0d1a;padding:8px;border-radius:6px;font-family:monospace;font-size:11px;word-break:break-all;color:#60a5fa">16666181244@163.com</div>
-      <div style="font-size:11px;color:#666;margin-top:4px">金额: $9 USD</div>
+    <div class="pay-info">
+      <div class="pay-label" style="color:#f7931a">₿ BTC 支付</div>
+      <div class="pay-addr" style="color:#4ade80">1MLcB51Zya52oV445GZGMn1qqeYEAJ67Ds</div>
+      <div class="pay-amount">金额: 0.0001 BTC</div>
+      <div class="pay-label" style="color:#00457C;margin-top:10px">💳 PayPal 支付</div>
+      <div class="pay-addr" style="color:#60a5fa">16666181244@163.com</div>
+      <div class="pay-amount">金额: $9 USD</div>
     </div>
-    <div style="font-size:11px;color:#888;margin-bottom:8px">付款后提交凭证: POST /confirm?email=...&tier=pro&txid=...</div>
-    <a class="buy-btn buy-pro" href="/pricing" target="_blank">升级 Pro →</a>
+    <button class="buy-btn buy-pro" onclick="openModal('pay','pro')">我已付款，提交凭证</button>
   </div>
   <div class="pricing-card">
     <div class="plan-name">Enterprise</div>
@@ -664,30 +679,128 @@ footer{text-align:center;padding:20px;color:#555;font-size:12px}
       <li>历史数据查询</li>
       <li>SLA保障 + 优先支持</li>
     </ul>
-    <div class="pay-methods" style="margin-bottom:12px">
-      <div style="font-size:13px;color:#f7931a;font-weight:700;margin-bottom:8px">₿ BTC</div>
-      <div style="background:#0d0d1a;padding:8px;border-radius:6px;font-family:monospace;font-size:11px;word-break:break-all;color:#4ade80">1MLcB51Zya52oV445GZGMn1qqeYEAJ67Ds</div>
-      <div style="font-size:11px;color:#666;margin-top:4px">金额: 0.0005 BTC</div>
-      <div style="margin-top:12px;font-size:13px;color:#00457C;font-weight:700;margin-bottom:8px">💳 PayPal</div>
-      <div style="background:#0d0d1a;padding:8px;border-radius:6px;font-family:monospace;font-size:11px;word-break:break-all;color:#60a5fa">16666181244@163.com</div>
-      <div style="font-size:11px;color:#666;margin-top:4px">金额: $49 USD</div>
+    <div class="pay-info">
+      <div class="pay-label" style="color:#f7931a">₿ BTC 支付</div>
+      <div class="pay-addr" style="color:#4ade80">1MLcB51Zya52oV445GZGMn1qqeYEAJ67Ds</div>
+      <div class="pay-amount">金额: 0.0005 BTC</div>
+      <div class="pay-label" style="color:#00457C;margin-top:10px">💳 PayPal 支付</div>
+      <div class="pay-addr" style="color:#60a5fa">16666181244@163.com</div>
+      <div class="pay-amount">金额: $49 USD</div>
     </div>
-    <div style="font-size:11px;color:#888;margin-bottom:8px">付款后提交凭证: POST /confirm?email=...&tier=enterprise&txid=...</div>
-    <a class="buy-btn buy-enterprise" href="/pricing" target="_blank">升级 Enterprise →</a>
+    <button class="buy-btn buy-enterprise" onclick="openModal('pay','enterprise')">我已付款，提交凭证</button>
   </div>
 </div>
+</div>
+
+<!-- 注册弹窗 -->
+<div class="modal-overlay" id="registerModal">
+  <div class="modal">
+    <h3>免费注册 API Key</h3>
+    <label>邮箱地址</label>
+    <input type="email" id="regEmail" placeholder="you@example.com">
+    <button class="modal-btn" onclick="doRegister()">获取免费 API Key</button>
+    <div class="msg" id="regMsg"></div>
+    <button class="close-btn" onclick="closeModal('registerModal')">✕</button>
+  </div>
+</div>
+
+<!-- 付款确认弹窗 -->
+<div class="modal-overlay" id="payModal">
+  <div class="modal">
+    <h3>提交付款凭证</h3>
+    <label>邮箱地址</label>
+    <input type="email" id="payEmail" placeholder="you@example.com">
+    <label>升级方案</label>
+    <select id="payTier">
+      <option value="pro">Pro — $9/月</option>
+      <option value="enterprise">Enterprise — $49/月</option>
+    </select>
+    <label>交易凭证 (BTC txid 或 PayPal交易号)</label>
+    <input type="text" id="payTxid" placeholder="例如: a1b2c3d4... 或 PayPal交易号">
+    <button class="modal-btn" onclick="doConfirm()">提交</button>
+    <div class="msg" id="payMsg"></div>
+    <button class="close-btn" onclick="closeModal('payModal')">✕</button>
+  </div>
 </div>
 
 <div class="share-bar">
 <h4>觉得有用？分享给更多开发者</h4>
 <div class="share-btns">
-<a class="share-twitter" href="https://twitter.com/intent/tweet?text=FinAPI%20Gateway%20-%20%E5%85%8D%E8%B4%B9%E9%87%91%E8%9E%8D%E6%95%B0%E6%8D%AEAPI" onclick="this.href+=location.origin" target="_blank">Twitter</a>
-<a class="share-copy" onclick="navigator.clipboard.writeText(location.origin+'/landing');this.textContent='已复制！';setTimeout(()=>this.textContent='📋 复制链接',2000)">📋 复制链接</a>
+<button class="share-copy" onclick="copyLink()">📋 复制链接</button>
 </div>
 </div>
 
 <footer>FinAPI Gateway v0.5.0 | Open Source | Powered by First Principles</footer>
 
+<script>
+function openModal(type, tier) {
+  if (type === 'register') {
+    document.getElementById('registerModal').classList.add('active');
+  } else {
+    document.getElementById('payModal').classList.add('active');
+    if (tier) document.getElementById('payTier').value = tier;
+  }
+}
+function closeModal(id) {
+  document.getElementById(id).classList.remove('active');
+}
+
+// 点击overlay关闭
+document.querySelectorAll('.modal-overlay').forEach(el => {
+  el.addEventListener('click', e => { if (e.target === el) el.classList.remove('active'); });
+});
+
+async function doRegister() {
+  const email = document.getElementById('regEmail').value.trim();
+  const msg = document.getElementById('regMsg');
+  if (!email || !email.includes('@')) {
+    msg.className = 'msg error'; msg.textContent = '请输入有效邮箱'; return;
+  }
+  try {
+    const r = await fetch('/register?email=' + encodeURIComponent(email), {method:'POST'});
+    const d = await r.json();
+    if (d.api_key) {
+      msg.className = 'msg success';
+      msg.innerHTML = '✅ 注册成功！<br>API Key: <strong style="color:#fff;font-family:monospace">' + d.api_key + '</strong><br>每日 ' + d.limit + ' 次免费调用';
+    } else {
+      msg.className = 'msg error'; msg.textContent = d.detail || '注册失败';
+    }
+  } catch(e) {
+    msg.className = 'msg error'; msg.textContent = '网络错误';
+  }
+}
+
+async function doConfirm() {
+  const email = document.getElementById('payEmail').value.trim();
+  const tier = document.getElementById('payTier').value;
+  const txid = document.getElementById('payTxid').value.trim();
+  const msg = document.getElementById('payMsg');
+  if (!email || !email.includes('@')) {
+    msg.className = 'msg error'; msg.textContent = '请输入有效邮箱'; return;
+  }
+  if (!txid) {
+    msg.className = 'msg error'; msg.textContent = '请输入交易凭证(txid/交易号)'; return;
+  }
+  try {
+    const r = await fetch('/confirm?email=' + encodeURIComponent(email) + '&tier=' + tier + '&txid=' + encodeURIComponent(txid), {method:'POST'});
+    const d = await r.json();
+    if (d.status === 'submitted') {
+      msg.className = 'msg success';
+      msg.innerHTML = '✅ 凭证已提交！<br>我们验证链上交易后会在24小时内升级你的 API Key。<br>方案: <strong>' + tier + '</strong> | 金额: <strong>' + d.details.btc_amount + '</strong>';
+    } else {
+      msg.className = 'msg error'; msg.textContent = d.detail || '提交失败';
+    }
+  } catch(e) {
+    msg.className = 'msg error'; msg.textContent = '网络错误';
+  }
+}
+
+function copyLink() {
+  navigator.clipboard.writeText(location.origin + '/landing');
+  event.target.textContent = '已复制！';
+  setTimeout(() => event.target.textContent = '📋 复制链接', 2000);
+}
+</script>
 </body>
 </html>
 """
@@ -698,7 +811,7 @@ def landing():
 
 @app.get("/pricing", response_class=HTMLResponse)
 def pricing_page():
-    return LANDING_HTML + "<!-- pricing section above -->"
+    return LANDING_HTML
 
 @app.get("/market/widget", response_class=HTMLResponse)
 def market_widget():
