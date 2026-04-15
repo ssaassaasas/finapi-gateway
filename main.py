@@ -6,9 +6,9 @@ FinAPI Gateway v0.5.0 - 统一金融数据API网关
 + 调用统计
 + 可嵌入市场概览Widget
 + 分享式Landing Page
-+ 付费层 (Pro/Enterprise)
++ 付费层 (Pro/Enterprise) + BTC收款
 + 自动注册
-+ LemonSqueezy Webhook
++ 支付确认Webhook
 """
 
 from fastapi import FastAPI, HTTPException, Query, Depends, Header, Request
@@ -37,10 +37,13 @@ app.add_middleware(
 # ============ 持久化API Key系统 ============
 KEYS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "api_keys.json")
 
+# ============ 收款配置 ============
+BTC_ADDRESS = "1MLcB51Zya52oV445GZGMn1qqeYEAJ67Ds"
+
 TIER_CONFIG = {
-    "free": {"limit": 1000, "cache_ttl": 300, "price": "$0/月"},
-    "pro": {"limit": 50000, "cache_ttl": 60, "price": "$9/月"},
-    "enterprise": {"limit": 500000, "cache_ttl": 10, "price": "$49/月"},
+    "free": {"limit": 1000, "cache_ttl": 300, "price": "$0/月", "btc_price": None},
+    "pro": {"limit": 50000, "cache_ttl": 60, "price": "$9/月", "btc_price": "0.0001 BTC"},
+    "enterprise": {"limit": 500000, "cache_ttl": 10, "price": "$49/月", "btc_price": "0.0005 BTC"},
 }
 
 def load_api_keys():
@@ -283,7 +286,7 @@ def root():
             "GET /health - 健康检查",
             "GET /pricing - 定价方案",
             "POST /register - 免费注册API Key",
-            "POST /webhook/lemonsqueezy - 支付回调",
+            "POST /webhook/payment - 支付确认回调",
         ],
         "auth": "所有API需要在Header中设置 X-API-Key。免费注册: POST /register",
         "docs": "/docs",
@@ -338,7 +341,9 @@ def pricing():
                 "limit": TIER_CONFIG["pro"]["limit"],
                 "cache_ttl": f"{TIER_CONFIG['pro']['cache_ttl']}秒(更实时)",
                 "features": ["Free全部功能", "50,000次/天", "1分钟缓存(更实时)", "自选币种/股票组合", "邮件支持"],
-                "buy_url": "https://ssaassaasas.lemonsqueezy.com/checkout/buy/f305d4a0-5e06-4c7e-8c3e-9a5e3c4d1b2a",
+                "btc_price": "0.0001 BTC",
+                "btc_address": BTC_ADDRESS,
+                "instructions": f"发送 0.0001 BTC 到 {BTC_ADDRESS}，然后在 /confirm 标注你的邮箱和txid"
             },
             {
                 "tier": "enterprise",
@@ -347,31 +352,30 @@ def pricing():
                 "limit": TIER_CONFIG["enterprise"]["limit"],
                 "cache_ttl": f"{TIER_CONFIG['enterprise']['cache_ttl']}秒(准实时)",
                 "features": ["Pro全部功能", "500,000次/天", "10秒缓存(准实时)", "历史数据查询", "SLA保障", "优先支持"],
-                "buy_url": "https://ssaassaasas.lemonsqueezy.com/checkout/buy/a1b2c3d4-5e6f-7a8b-9c0d-e1f2a3b4c5d6",
+                "btc_price": "0.0005 BTC",
+                "btc_address": BTC_ADDRESS,
+                "instructions": f"发送 0.0005 BTC 到 {BTC_ADDRESS}，然后在 /confirm 标注你的邮箱和txid"
             },
         ],
         "current_free_key": "finapi-free-2026",
         "register": "POST /register?email=your@email.com",
     }
 
-@app.post("/webhook/lemonsqueezy")
-async def lemon_webhook(request: Request):
-    """LemonSqueezy支付回调 - 付费成功自动升级API Key"""
+@app.post("/webhook/payment")
+async def payment_webhook(request: Request):
+    """支付确认回调 - 支持BTC/链上支付确认后自动升级API Key"""
     try:
         body = await request.json()
-        # LemonSqueezy webhook格式
-        meta = body.get("meta", {})
-        custom_data = meta.get("custom_data", {})
-        email = custom_data.get("email", "")
-        product_name = meta.get("product_name", "").lower()
+        email = body.get("email", "")
+        tier = body.get("tier", "pro")
+        txid = body.get("txid", "")
+        confirmations = body.get("confirmations", 0)
 
-        if not email:
-            return JSONResponse({"status": "ignored", "reason": "no email"})
+        if not email or not txid:
+            return JSONResponse({"status": "ignored", "reason": "need email and txid"})
 
-        # 判断tier
-        tier = "pro"
-        if "enterprise" in product_name or "49" in str(meta.get("price", "")):
-            tier = "enterprise"
+        if tier not in ("pro", "enterprise"):
+            return JSONResponse({"status": "ignored", "reason": "invalid tier"})
 
         # 查找或创建用户
         existing_key = None
@@ -381,13 +385,13 @@ async def lemon_webhook(request: Request):
                 break
 
         if existing_key:
-            # 升级现有Key
             API_KEYS[existing_key]["tier"] = tier
             API_KEYS[existing_key]["upgraded_at"] = time.time()
+            API_KEYS[existing_key]["payment_txid"] = txid
+            API_KEYS[existing_key]["payment_confirmations"] = confirmations
             save_api_keys(API_KEYS)
             return {"status": "upgraded", "api_key": existing_key, "tier": tier}
         else:
-            # 创建新Key
             new_key = f"finapi-{tier}-{secrets.token_hex(8)}"
             API_KEYS[new_key] = {
                 "name": email.split("@")[0],
@@ -395,12 +399,59 @@ async def lemon_webhook(request: Request):
                 "tier": tier,
                 "created": time.time(),
                 "upgraded_at": time.time(),
+                "payment_txid": txid,
+                "payment_confirmations": confirmations,
             }
             save_api_keys(API_KEYS)
             return {"status": "created", "api_key": new_key, "tier": tier}
 
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Webhook error: {e}")
+
+@app.post("/confirm")
+async def confirm_payment(
+    email: str = Query(..., description="你的邮箱"),
+    tier: str = Query("pro", description="升级层级: pro 或 enterprise"),
+    txid: str = Query(..., description="BTC交易ID(txid)"),
+):
+    """提交BTC支付确认 — 付款后提交txid，人工或自动确认后升级"""
+    if tier not in ("pro", "enterprise"):
+        raise HTTPException(status_code=400, detail="tier必须是pro或enterprise")
+
+    btc_amount = TIER_CONFIG[tier]["btc_price"]
+
+    # 记录待确认的付款
+    pending_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pending_payments.json")
+    pending = []
+    if os.path.exists(pending_file):
+        with open(pending_file, "r") as f:
+            pending = json.load(f)
+
+    payment_record = {
+        "email": email,
+        "tier": tier,
+        "txid": txid,
+        "btc_amount": btc_amount,
+        "btc_address": BTC_ADDRESS,
+        "submitted_at": time.time(),
+        "status": "pending",
+    }
+    pending.append(payment_record)
+
+    with open(pending_file, "w") as f:
+        json.dump(pending, f, indent=2, ensure_ascii=False)
+
+    return {
+        "status": "submitted",
+        "message": f"支付确认已提交！我们验证链上交易后会在24小时内升级你的Key。",
+        "details": {
+            "email": email,
+            "tier": tier,
+            "btc_amount": btc_amount,
+            "txid": txid,
+        },
+        "note": "如果你已有API Key，升级后会保留原Key。如需新Key，请先 /register 再付款。",
+    }
 
 # ============ 受保护的数据端点 ============
 
@@ -586,7 +637,12 @@ footer{text-align:center;padding:20px;color:#555;font-size:12px}
       <li>自选币种/股票组合</li>
       <li>邮件支持</li>
     </ul>
-    <a class="buy-btn buy-pro" href="https://ssaassaasas.lemonsqueezy.com/checkout/buy/f305d4a0-5e06-4c7e-8c3e-9a5e3c4d1b2a">升级 Pro →</a>
+    <div class="btc-pay" style="margin-bottom:12px">
+      <div style="font-size:12px;color:#888;margin-bottom:6px">发送 0.0001 BTC 到:</div>
+      <div style="background:#0d0d1a;padding:8px;border-radius:6px;font-family:monospace;font-size:11px;word-break:break-all;color:#4ade80">1MLcB51Zya52oV445GZGMn1qqeYEAJ67Ds</div>
+      <div style="font-size:11px;color:#666;margin-top:4px">付款后提交txid: POST /confirm?email=...&tier=pro&txid=...</div>
+    </div>
+    <a class="buy-btn buy-pro" href="#pro-payment">BTC 支付升级 →</a>
   </div>
   <div class="pricing-card">
     <div class="plan-name">Enterprise</div>
@@ -599,7 +655,12 @@ footer{text-align:center;padding:20px;color:#555;font-size:12px}
       <li>历史数据查询</li>
       <li>SLA保障 + 优先支持</li>
     </ul>
-    <a class="buy-btn buy-enterprise" href="https://ssaassaasas.lemonsqueezy.com/checkout/buy/a1b2c3d4-5e6f-7a8b-9c0d-e1f2a3b4c5d6">升级 Enterprise →</a>
+    <div class="btc-pay" style="margin-bottom:12px">
+      <div style="font-size:12px;color:#888;margin-bottom:6px">发送 0.0005 BTC 到:</div>
+      <div style="background:#0d0d1a;padding:8px;border-radius:6px;font-family:monospace;font-size:11px;word-break:break-all;color:#4ade80">1MLcB51Zya52oV445GZGMn1qqeYEAJ67Ds</div>
+      <div style="font-size:11px;color:#666;margin-top:4px">付款后提交txid: POST /confirm?email=...&tier=enterprise&txid=...</div>
+    </div>
+    <a class="buy-btn buy-enterprise" href="#enterprise-payment">BTC 支付升级 →</a>
   </div>
 </div>
 </div>
