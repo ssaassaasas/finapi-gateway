@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+*.png
+*.jpg
+*.json
+!requirements.txt
+.env
+*.log

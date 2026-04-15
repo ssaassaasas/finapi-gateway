@@ -1,9 +1,11 @@
 """
-FinAPI Gateway v0.2.0 - 统一金融数据API网关
+FinAPI Gateway v0.4.0 - 统一金融数据API网关
 聚合多个免费数据源，统一输出格式
 + Gate.io加密货币源
 + API Key认证
 + 调用统计
++ 可嵌入市场概览Widget
++ 分享式Landing Page
 """
 
 from fastapi import FastAPI, HTTPException, Query, Depends, Header
@@ -16,7 +18,7 @@ from collections import defaultdict
 app = FastAPI(
     title="FinAPI Gateway",
     description="统一金融数据API网关 - 聚合汇率、股票、加密货币等免费数据源",
-    version="0.2.0",
+    version="0.4.0",
 )
 
 app.add_middleware(
@@ -257,17 +259,20 @@ def fetch_market_overview():
 def root():
     return {
         "service": "FinAPI Gateway",
-        "version": "0.2.0",
+        "version": "0.4.0",
         "endpoints": [
             "GET /fx - 汇率查询",
             "GET /fx/convert - 货币转换",
             "GET /crypto - 加密货币价格",
             "GET /cn/stock - A股行情",
             "GET /market - 全球市场概览",
+            "GET /market/widget - 可嵌入Widget",
             "GET /stats - 调用统计",
             "GET /health - 健康检查",
+            "GET /landing - 产品落地页",
         ],
         "auth": "所有API需要在Header中设置 X-API-Key。免费Key: finapi-free-2026",
+        "docs": "/docs",
     }
 
 @app.get("/health")
@@ -327,66 +332,157 @@ def get_stats(key_info: dict = Depends(verify_api_key)):
 
 # ============ 落地页 ============
 
+LANDING_HTML = """
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FinAPI Gateway - 统一金融数据API | 免费汇率·加密货币·A股</title>
+<meta name="description" content="一个API搞定汇率查询、加密货币价格、A股行情。免费1000次/天，5行代码接入。">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:system-ui,-apple-system,sans-serif;background:#0f0f23;color:#e0e0e0;line-height:1.6}
+.hero{text-align:center;padding:60px 20px 40px;background:linear-gradient(135deg,#0f0f23 0%,#1a1a3e 100%)}
+.hero h1{font-size:2.5em;background:linear-gradient(90deg,#00d2ff,#7b2ff7);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:12px}
+.hero p{font-size:1.2em;color:#aaa;max-width:600px;margin:0 auto}
+.badges{display:flex;justify-content:center;gap:12px;margin-top:20px;flex-wrap:wrap}
+.badge{display:inline-block;padding:4px 12px;border-radius:20px;font-size:13px;font-weight:600}
+.badge-green{background:#1a3a2a;color:#4ade80}
+.badge-blue{background:#1a2a4a;color:#60a5fa}
+.badge-purple{background:#2a1a4a;color:#c084fc}
+.features{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px;padding:40px 20px;max-width:1000px;margin:0 auto}
+.feature{background:#1a1a3e;border-radius:12px;padding:24px;border:1px solid #2a2a5e}
+.feature h3{color:#00d2ff;margin-bottom:8px;font-size:1.1em}
+.feature p{color:#999;font-size:0.95em}
+.code-block{background:#0d0d1a;border:1px solid #2a2a5e;border-radius:8px;padding:16px;overflow-x:auto;font-family:'Fira Code',monospace;font-size:13px;color:#b5b5b5;margin:8px 0}
+.code-block .key{color:#c084fc}.code-block .str{color:#4ade80}.code-block .url{color:#60a5fa}
+.cta{text-align:center;padding:40px 20px}
+.cta-btn{display:inline-block;background:linear-gradient(90deg,#00d2ff,#7b2ff7);color:#fff;padding:14px 32px;border-radius:8px;font-size:1.1em;text-decoration:none;font-weight:600;transition:transform .2s}
+.cta-btn:hover{transform:scale(1.05)}
+.share-bar{text-align:center;padding:20px;background:#1a1a3e;margin-top:40px}
+.share-bar h4{color:#888;margin-bottom:12px;font-weight:normal}
+.share-btns{display:flex;justify-content:center;gap:12px;flex-wrap:wrap}
+.share-btns a{display:inline-block;padding:8px 16px;border-radius:6px;text-decoration:none;font-size:13px;font-weight:600}
+.share-twitter{background:#1da1f2;color:#fff}
+.share-weibo{background:#e6162d;color:#fff}
+.share-copy{background:#333;color:#fff;cursor:pointer}
+.widget-preview{max-width:500px;margin:30px auto;border-radius:12px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.5)}
+.widget-preview iframe{width:100%;border:none}
+footer{text-align:center;padding:20px;color:#555;font-size:12px}
+</style>
+</head>
+<body>
+
+<div class="hero">
+<h1>FinAPI Gateway</h1>
+<p>一个API搞定全球金融数据 — 汇率 · 加密货币 · A股行情<br>免费1000次/天，5行代码接入</p>
+<div class="badges">
+<span class="badge badge-green">免费使用</span>
+<span class="badge badge-blue">166种货币</span>
+<span class="badge badge-purple">10+加密货币</span>
+</div>
+</div>
+
+<div class="features">
+<div class="feature">
+<h3>💱 汇率查询 & 转换</h3>
+<p>166种货币实时汇率，支持任意货币对转换。数据源: exchangerate-api</p>
+<div class="code-block">curl -H <span class="str">"X-API-Key: finapi-free-2026"</span> <span class="url">"/fx/convert?amount=1000&from_curr=USD&to_curr=CNY"</span></div>
+</div>
+<div class="feature">
+<h3>₿ 加密货币价格</h3>
+<p>BTC/ETH/SOL/BNB等10+主流币种，24h涨跌幅、成交量。数据源: Gate.io</p>
+<div class="code-block">curl -H <span class="str">"X-API-Key: finapi-free-2026"</span> <span class="url">"/crypto?ids=bitcoin,ethereum"</span></div>
+</div>
+<div class="feature">
+<h3>📈 A股实时行情</h3>
+<p>全市场A股实时行情，支持指数和个股查询。数据源: 新浪财经</p>
+<div class="code-block">curl -H <span class="str">"X-API-Key: finapi-free-2026"</span> <span class="url">"/cn/stock?symbol=sh600519"</span></div>
+</div>
+<div class="feature">
+<h3>🌐 全球市场概览</h3>
+<p>一站式查看汇率+加密+指数，可嵌入Widget。适合金融仪表盘和App</p>
+<div class="code-block">curl -H <span class="str">"X-API-Key: finapi-free-2026"</span> <span class="url">"/market"</span></div>
+</div>
+</div>
+
+<div class="widget-preview">
+<iframe src="/market/widget" height="320" loading="lazy"></iframe>
+</div>
+
+<div class="cta">
+<p style="color:#aaa;margin-bottom:16px">复制免费API Key，5行代码开始接入</p>
+<div class="code-block" style="text-align:center;font-size:18px;max-width:400px;margin:0 auto">
+<span class="key">X-API-Key:</span> <span class="str">finapi-free-2026</span>
+</div>
+<br>
+<a class="cta-btn" href="/docs" target="_blank">查看完整API文档 →</a>
+</div>
+
+<div class="share-bar">
+<h4>觉得有用？分享给更多开发者</h4>
+<div class="share-btns">
+<a class="share-twitter" href="https://twitter.com/intent/tweet?text=FinAPI%20Gateway%20-%20%E5%85%8D%E8%B4%B9%E9%87%91%E8%9E%8D%E6%95%B0%E6%8D%AEAPI%EF%BC%8C%E4%B8%80%E4%B8%AA%E6%8E%A5%E5%8F%A3%E6%90%9E%E5%AE%9A%E6%B1%87%E7%8E%87%2B%E5%8A%A0%E5%AF%86%E8%B4%A7%E5%B8%81%2BA%E8%82%A1&url=" onclick="this.href+=location.origin" target="_blank">Twitter</a>
+<a class="share-copy" onclick="navigator.clipboard.writeText(location.origin+'/landing');this.textContent='已复制！';setTimeout(()=>this.textContent='📋 复制链接',2000)">📋 复制链接</a>
+</div>
+</div>
+
+<footer>FinAPI Gateway v0.4.0 | 开源免费 | Powered by First Principles</footer>
+
+</body>
+</html>
+"""
+
 @app.get("/landing", response_class=HTMLResponse)
 def landing():
-    return """
-    <!DOCTYPE html>
-    <html>
-    <head><title>FinAPI Gateway - 统一金融数据API</title></head>
-    <body style="font-family:system-ui;max-width:720px;margin:40px auto;padding:0 20px;color:#333">
-        <h1>FinAPI Gateway</h1>
-        <p>统一金融数据API网关 — 一个接口获取汇率、加密货币、A股行情</p>
+    return LANDING_HTML
 
-        <h2>快速开始</h2>
-        <pre style="background:#f5f5f5;padding:16px;border-radius:8px;overflow-x:auto">
-# 获取免费API Key
-X-API-Key: finapi-free-2026
-
-# 查询汇率
-curl -H "X-API-Key: finapi-free-2026" \\
-     "http://49.232.155.209:8000/fx?base=CNY"
-
-# 货币转换
-curl -H "X-API-Key: finapi-free-2026" \\
-     "http://49.232.155.209:8000/fx/convert?amount=100&from_curr=USD&to_curr=CNY"
-
-# 加密货币价格
-curl -H "X-API-Key: finapi-free-2026" \\
-     "http://49.232.155.209:8000/crypto?ids=bitcoin,ethereum,solana"
-
-# A股行情
-curl -H "X-API-Key: finapi-free-2026" \\
-     "http://49.232.155.209:8000/cn/stock?symbol=sh600519"
-
-# 全球市场概览
-curl -H "X-API-Key: finapi-free-2026" \\
-     "http://49.232.155.209:8000/market"
-        </pre>
-
-        <h2>API端点</h2>
-        <table style="width:100%;border-collapse:collapse">
-            <tr style="background:#f0f0f0"><th style="padding:8px;text-align:left">端点</th><th style="padding:8px;text-align:left">说明</th></tr>
-            <tr><td style="padding:8px">GET /fx</td><td style="padding:8px">166种货币汇率</td></tr>
-            <tr><td style="padding:8px">GET /fx/convert</td><td style="padding:8px">实时货币转换</td></tr>
-            <tr><td style="padding:8px">GET /crypto</td><td style="padding:8px">10+加密货币价格(Gate.io)</td></tr>
-            <tr><td style="padding:8px">GET /cn/stock</td><td style="padding:8px">A股实时行情(新浪)</td></tr>
-            <tr><td style="padding:8px">GET /market</td><td style="padding:8px">全球市场概览(一站式)</td></tr>
-        </table>
-
-        <h2>免费额度</h2>
-        <p>每日1,000次调用。5分钟数据缓存，减少延迟。</p>
-
-        <h2>数据源</h2>
-        <ul>
-            <li>汇率: exchangerate-api.com (166种货币)</li>
-            <li>加密货币: Gate.io (BTC/ETH/SOL/BNB等)</li>
-            <li>A股: 新浪财经 (实时行情)</li>
-        </ul>
-
-        <p style="color:#999;margin-top:40px">FinAPI Gateway v0.2.0 | 由马斯克操作系统驱动</p>
-    </body>
-    </html>
-    """
+@app.get("/market/widget", response_class=HTMLResponse)
+def market_widget():
+    """可嵌入的市场概览Widget - 可直接用iframe嵌入任何网页"""
+    return """<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>市场概览</title></head>
+<body style="font-family:system-ui;margin:0;padding:12px;background:#1a1a2e;color:#eee">
+<div id="app">加载中...</div>
+<script>
+async function load(){
+  try {
+    const r = await fetch('/market', {headers: {'X-API-Key': 'finapi-free-2026'}});
+    const d = await r.json();
+    let h = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">';
+    // 汇率
+    if(d.usd_cny) h += `<div style="background:#16213e;padding:12px;border-radius:8px">
+      <div style="color:#888;font-size:12px">USD/CNY</div>
+      <div style="font-size:24px;font-weight:bold">${d.usd_cny}</div></div>`;
+    if(d.usd_eur) h += `<div style="background:#16213e;padding:12px;border-radius:8px">
+      <div style="color:#888;font-size:12px">USD/EUR</div>
+      <div style="font-size:24px;font-weight:bold">${d.usd_eur}</div></div>`;
+    // 加密货币
+    if(d.crypto){
+      for(const[k,v] of Object.entries(d.crypto)){
+        const chg = v.change_24h > 0 ? '+'+v.change_24h : v.change_24h;
+        const clr = v.change_24h >= 0 ? '#00d2ff' : '#ff6b6b';
+        h += `<div style="background:#16213e;padding:12px;border-radius:8px">
+          <div style="color:#888;font-size:12px">${k.toUpperCase()}</div>
+          <div style="font-size:20px;font-weight:bold">$${v.usd.toLocaleString()}</div>
+          <div style="color:${clr};font-size:12px">${chg}%</div></div>`;
+      }
+    }
+    // 指数
+    if(d.shanghai) h += `<div style="background:#16213e;padding:12px;border-radius:8px">
+      <div style="color:#888;font-size:12px">上证指数</div>
+      <div style="font-size:20px;font-weight:bold">${d.shanghai.price}</div>
+      <div style="color:${d.shanghai.change_pct>=0?'#00d2ff':'#ff6b6b'};font-size:12px">${d.shanghai.change_pct}%</div></div>`;
+    h += '</div>';
+    h += '<div style="text-align:center;margin-top:12px;font-size:11px;color:#555">Powered by FinAPI Gateway</div>';
+    document.getElementById('app').innerHTML = h;
+  } catch(e) { document.getElementById('app').innerHTML = '加载失败: '+e; }
+}
+load();
+setInterval(load, 300000);
+</script>
+</body></html>"""
 
 if __name__ == "__main__":
     import uvicorn
