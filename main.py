@@ -39,11 +39,12 @@ KEYS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "api_keys.j
 
 # ============ 收款配置 ============
 BTC_ADDRESS = "1MLcB51Zya52oV445GZGMn1qqeYEAJ67Ds"
+PAYPAL_ACCOUNT = "16666181244@163.com"
 
 TIER_CONFIG = {
-    "free": {"limit": 1000, "cache_ttl": 300, "price": "$0/月", "btc_price": None},
-    "pro": {"limit": 50000, "cache_ttl": 60, "price": "$9/月", "btc_price": "0.0001 BTC"},
-    "enterprise": {"limit": 500000, "cache_ttl": 10, "price": "$49/月", "btc_price": "0.0005 BTC"},
+    "free": {"limit": 1000, "cache_ttl": 300, "price": "$0/月", "btc_price": None, "paypal_amount": None},
+    "pro": {"limit": 50000, "cache_ttl": 60, "price": "$9/月", "btc_price": "0.0001 BTC", "paypal_amount": "$9"},
+    "enterprise": {"limit": 500000, "cache_ttl": 10, "price": "$49/月", "btc_price": "0.0005 BTC", "paypal_amount": "$49"},
 }
 
 def load_api_keys():
@@ -343,7 +344,9 @@ def pricing():
                 "features": ["Free全部功能", "50,000次/天", "1分钟缓存(更实时)", "自选币种/股票组合", "邮件支持"],
                 "btc_price": "0.0001 BTC",
                 "btc_address": BTC_ADDRESS,
-                "instructions": f"发送 0.0001 BTC 到 {BTC_ADDRESS}，然后在 /confirm 标注你的邮箱和txid"
+                "paypal_amount": "$9",
+                "paypal_account": PAYPAL_ACCOUNT,
+                "instructions": f"方式1: 发送 0.0001 BTC 到 {BTC_ADDRESS} | 方式2: PayPal转账 $9 到 {PAYPAL_ACCOUNT}，然后在 /confirm 标注邮箱和交易凭证"
             },
             {
                 "tier": "enterprise",
@@ -354,7 +357,9 @@ def pricing():
                 "features": ["Pro全部功能", "500,000次/天", "10秒缓存(准实时)", "历史数据查询", "SLA保障", "优先支持"],
                 "btc_price": "0.0005 BTC",
                 "btc_address": BTC_ADDRESS,
-                "instructions": f"发送 0.0005 BTC 到 {BTC_ADDRESS}，然后在 /confirm 标注你的邮箱和txid"
+                "paypal_amount": "$49",
+                "paypal_account": PAYPAL_ACCOUNT,
+                "instructions": f"方式1: 发送 0.0005 BTC 到 {BTC_ADDRESS} | 方式2: PayPal转账 $49 到 {PAYPAL_ACCOUNT}，然后在 /confirm 标注邮箱和交易凭证"
             },
         ],
         "current_free_key": "finapi-free-2026",
@@ -637,12 +642,16 @@ footer{text-align:center;padding:20px;color:#555;font-size:12px}
       <li>自选币种/股票组合</li>
       <li>邮件支持</li>
     </ul>
-    <div class="btc-pay" style="margin-bottom:12px">
-      <div style="font-size:12px;color:#888;margin-bottom:6px">发送 0.0001 BTC 到:</div>
+    <div class="pay-methods" style="margin-bottom:12px">
+      <div style="font-size:13px;color:#f7931a;font-weight:700;margin-bottom:8px">₿ BTC</div>
       <div style="background:#0d0d1a;padding:8px;border-radius:6px;font-family:monospace;font-size:11px;word-break:break-all;color:#4ade80">1MLcB51Zya52oV445GZGMn1qqeYEAJ67Ds</div>
-      <div style="font-size:11px;color:#666;margin-top:4px">付款后提交txid: POST /confirm?email=...&tier=pro&txid=...</div>
+      <div style="font-size:11px;color:#666;margin-top:4px">金额: 0.0001 BTC</div>
+      <div style="margin-top:12px;font-size:13px;color:#00457C;font-weight:700;margin-bottom:8px">💳 PayPal</div>
+      <div style="background:#0d0d1a;padding:8px;border-radius:6px;font-family:monospace;font-size:11px;word-break:break-all;color:#60a5fa">16666181244@163.com</div>
+      <div style="font-size:11px;color:#666;margin-top:4px">金额: $9 USD</div>
     </div>
-    <a class="buy-btn buy-pro" href="#pro-payment">BTC 支付升级 →</a>
+    <div style="font-size:11px;color:#888;margin-bottom:8px">付款后提交凭证: POST /confirm?email=...&tier=pro&txid=...</div>
+    <a class="buy-btn buy-pro" href="/pricing" target="_blank">升级 Pro →</a>
   </div>
   <div class="pricing-card">
     <div class="plan-name">Enterprise</div>
@@ -655,12 +664,16 @@ footer{text-align:center;padding:20px;color:#555;font-size:12px}
       <li>历史数据查询</li>
       <li>SLA保障 + 优先支持</li>
     </ul>
-    <div class="btc-pay" style="margin-bottom:12px">
-      <div style="font-size:12px;color:#888;margin-bottom:6px">发送 0.0005 BTC 到:</div>
+    <div class="pay-methods" style="margin-bottom:12px">
+      <div style="font-size:13px;color:#f7931a;font-weight:700;margin-bottom:8px">₿ BTC</div>
       <div style="background:#0d0d1a;padding:8px;border-radius:6px;font-family:monospace;font-size:11px;word-break:break-all;color:#4ade80">1MLcB51Zya52oV445GZGMn1qqeYEAJ67Ds</div>
-      <div style="font-size:11px;color:#666;margin-top:4px">付款后提交txid: POST /confirm?email=...&tier=enterprise&txid=...</div>
+      <div style="font-size:11px;color:#666;margin-top:4px">金额: 0.0005 BTC</div>
+      <div style="margin-top:12px;font-size:13px;color:#00457C;font-weight:700;margin-bottom:8px">💳 PayPal</div>
+      <div style="background:#0d0d1a;padding:8px;border-radius:6px;font-family:monospace;font-size:11px;word-break:break-all;color:#60a5fa">16666181244@163.com</div>
+      <div style="font-size:11px;color:#666;margin-top:4px">金额: $49 USD</div>
     </div>
-    <a class="buy-btn buy-enterprise" href="#enterprise-payment">BTC 支付升级 →</a>
+    <div style="font-size:11px;color:#888;margin-bottom:8px">付款后提交凭证: POST /confirm?email=...&tier=enterprise&txid=...</div>
+    <a class="buy-btn buy-enterprise" href="/pricing" target="_blank">升级 Enterprise →</a>
   </div>
 </div>
 </div>
